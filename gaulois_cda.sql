@@ -1,18 +1,13 @@
 
 -- 1. Lister les personnages ayant bu plus de 2 potions différentes.
-SELECT
-	pe.id_personnage,
-	pe.nom_personnage,
-	SUM(bo.dose_boire) AS qttBue
-FROM
-	boire bo
-INNER JOIN personnage pe ON pe.id_personnage = bo.id_personnage
-INNER JOIN potion po ON po.id_potion = bo.id_potion
-GROUP BY
-	pe.id_personnage
-HAVING qttBue > 2
-ORDER BY 
-	qttBue DESC
+SELECT nom_personnage
+FROM (
+  SELECT p.nom_personnage, COUNT(DISTINCT b.id_potion) AS nb_potions
+  FROM boire b
+  JOIN personnage p ON b.id_personnage = p.id_personnage
+  GROUP BY p.nom_personnage
+) AS stats
+WHERE nb_potions > 2;
 
 -- 2. Donner le total de casques pris par type, avec leur coût cumulé.
 SELECT
@@ -77,12 +72,12 @@ INNER JOIN personnage pe ON ab.id_personnage = pe.id_personnage
 INNER JOIN potion po ON ab.id_potion = po.id_potion
 LEFT JOIN boire bo ON bo.id_personnage = ab.id_personnage AND bo.id_potion = ab.id_potion
 WHERE 
-	bo.id_potion IS NULL
+	ab.id_personnage = 1 AND bo.id_potion IS NULL
 
 -- 7. Afficher les personnages avec toutes les potions qu'ils ont bues dans une seule colonne séparée par des virgules.
 SELECT 
     pe.nom_personnage,
-    GROUP_CONCAT(po.nom_potion ORDER BY po.nom_potion SEPARATOR ', ') AS potions_bues
+    GROUP_CONCAT(DISTINCT po.nom_potion ORDER BY po.nom_potion SEPARATOR ', ') AS potions_bues
 FROM 
     boire bo
 INNER JOIN potion po ON po.id_potion = bo.id_potion
@@ -93,14 +88,12 @@ GROUP BY
 -- 8. Donner la moyenne de doses bues par spécialité (avec gestion des cas sans consommation).
 SELECT
 	AVG(bo.dose_boire),
-	pe.nom_personnage,
 	spe.nom_specialite
 FROM
 	boire bo
 LEFT JOIN personnage pe ON bo.id_personnage = pe.id_personnage
 LEFT JOIN specialite spe ON pe.id_specialite = spe.id_specialite
 GROUP BY 
-	pe.nom_personnage,
 	spe.nom_specialite
 
 -- 9. Lister les personnages ayant bu au moins 3 potions différentes le même jour.
@@ -114,7 +107,7 @@ WHERE bo.date_boire IN (
 		boire bo
     GROUP BY 
 		bo.date_boire
-    HAVING COUNT(*) > 1
+    HAVING COUNT(*) >= 3
 );
 
 -- 10. Créer un trigger qui empêche un personnage de boire une potion non autorisée.
@@ -138,11 +131,15 @@ DELIMITER ;
 -- 11. Créer une procédure stockée permettant de savoir quelles potions un personnage peut consommer à partir d’une liste d’identifiants.
 DELIMITER //
 CREATE PROCEDURE liste_boisson_autorisee
-(IN identifiants TEXT)
+(IN identifiants INT)
 BEGIN
-	SELECT * 
-	FROM autoriser_boire 
-	WHERE FIND_IN_SET(id_potion, identifiants);
+	SELECT 
+		a.id_potion,
+		po.nom_potion,
+		a.id_personnage
+	FROM autoriser_boire a
+	JOIN potion po ON a.id_potion = po.id_potion
+	WHERE a.id_personnage = identifiants;
 END;
 //
 DELIMITER ;
@@ -150,11 +147,11 @@ DELIMITER ;
 -- 12. Créer une procédure stockée qui met à jour la quantité de casques disponibles après une prise.
 DELIMITER //
 CREATE PROCEDURE maj_qte_casque
-(IN casqueId INT, IN persoId INT, IN batailleId INT, IN qteNb INT)
+(IN casqueId INT, IN persoId INT, IN batailleId INT)
 BEGIN
 	UPDATE prendre_casque
-    SET qte = qte - qteNb
-	WHERE id_casque = casqueId AND id_personnage = persoId AND id_bataille = batailleId;
+    SET qte = qte - 1
+	WHERE id_casque = casqueId AND id_personnage = persoId AND id_bataille = batailleId AND qte > 0;
 END;
 //
 DELIMITER ;
@@ -168,7 +165,7 @@ CREATE TABLE evenement
     id_evenement INT PRIMARY KEY NOT NULL,
 	id_boire INT NOT NULL,
 	FOREIGN KEY (id_boire) REFERENCES boire(id_boire),
-	nom_evenement VARCHAR(255)
+	nom_evenement VARCHAR(50)
 );
 
 -- 15. Créer une requête permettant de générer un journal des consommations : personnage, date, potion, dose, lieu.
